@@ -49,9 +49,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/your-org/a2a-wrapper"
-Documentation = "https://github.com/your-org/a2a-wrapper#readme"
-Repository = "https://github.com/your-org/a2a-wrapper"
+Homepage = "https://github.com/Abhitheshek/a2a-wrapper"
+Documentation = "https://github.com/Abhitheshek/a2a-wrapper#readme"
+Repository = "https://github.com/Abhitheshek/a2a-wrapper"
 
 [project.scripts]
 a2a-wrapper-client = "a2a_wrapper._client:main"
