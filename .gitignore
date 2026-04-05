@@ -1,0 +1,23 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+
+# Test/cache temp
+.pytest_cache/
+.coverage
+htmlcov/
+pytest-cache-files-*/
+
+# Local env files
+.env
+.venv/
+venv/
+
+# OS/editor junk
+.DS_Store
+Thumbs.db
