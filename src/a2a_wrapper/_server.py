@@ -4,7 +4,7 @@ import inspect
 import logging
 import uuid
 from dataclasses import dataclass, field
-from typing import Any, Awaitable, Callable, Dict, List, Optional, Protocol, Sequence, Union
+from typing import Any, Awaitable, Callable, Dict, List, Mapping, Optional, Sequence, Union
 
 try:
     import uvicorn
@@ -40,6 +40,7 @@ logger = logging.getLogger("a2a_wrapper.server")
 
 MaybeAwaitable = Union[Awaitable[Any], Any]
 RequestHandler = Callable[["AgentRequest", "ResponseContext"], MaybeAwaitable]
+CapabilityLike = Union["AgentCapability", Mapping[str, Any]]
 
 
 def _require_server_runtime() -> None:
@@ -55,6 +56,12 @@ def _ensure_non_empty(value: str, field_name: str) -> str:
     if not cleaned:
         raise ValueError(f"{field_name} must not be empty.")
     return cleaned
+
+
+def _slugify(value: str) -> str:
+    cleaned = "".join(char.lower() if char.isalnum() else "-" for char in value.strip())
+    parts = [part for part in cleaned.split("-") if part]
+    return "-".join(parts) or "agent"
 
 
 async def _resolve(value: MaybeAwaitable) -> Any:
@@ -328,23 +335,133 @@ class FunctionHandler(AgentHandlerBase):
 
 
 class AgentServer:
-    """Friendly server builder for exposing custom agents over A2A."""
+    """Friendly server builder for exposing custom agents over A2A.
+
+    For the common case, you only need:
+
+    - server name
+    - server description
+    - handler
+
+    Capabilities are optional. If omitted, the server creates a default capability
+    from the server name and description. If you pass capability mappings with
+    missing fields, the server fills them from the server details.
+    """
 
     def __init__(
         self,
-        config: AgentServerConfig,
-        capabilities: Sequence[AgentCapability],
-        handler: AgentExecutor,
+        config: Optional[AgentServerConfig] = None,
+        capabilities: Optional[Sequence[CapabilityLike]] = None,
+        handler: Optional[Union[AgentExecutor, RequestHandler]] = None,
         *,
+        name: Optional[str] = None,
+        description: Optional[str] = None,
+        version: str = "1.0.0",
+        host: str = "127.0.0.1",
+        port: int = 10002,
+        enable_streaming: bool = True,
+        docs_url: Optional[str] = None,
+        default_input_modes: Optional[Sequence[str]] = None,
+        default_output_modes: Optional[Sequence[str]] = None,
+        hooks: Optional[ExecutionHooks] = None,
         task_store_factory: Optional[Callable[[], Any]] = None,
     ):
         _require_server_runtime()
-        if not capabilities:
-            raise ValueError("At least one capability is required.")
+        if config is None:
+            if name is None or description is None:
+                raise ValueError(
+                    "Provide either config=AgentServerConfig(...) or both name= and description=."
+                )
+            config = AgentServerConfig(
+                name=name,
+                description=description,
+                version=version,
+                host=host,
+                port=port,
+                enable_streaming=enable_streaming,
+                docs_url=docs_url,
+                default_input_modes=list(default_input_modes or ["text/plain"]),
+                default_output_modes=list(default_output_modes or ["text/plain"]),
+            )
+        if handler is None:
+            raise ValueError("handler is required.")
         self.config = config
-        self.capabilities = list(capabilities)
-        self.handler = handler
+        normalized_capabilities = capabilities or [self._default_capability_mapping(config)]
+        self.capabilities = [
+            self._coerce_capability(
+                capability,
+                default_name=config.name,
+                default_description=config.description,
+            )
+            for capability in normalized_capabilities
+        ]
+        self.handler = self._coerce_handler(handler, hooks=hooks)
         self.task_store_factory = task_store_factory or InMemoryTaskStore
+
+    @staticmethod
+    def capability(
+        capability_id: str,
+        name: str,
+        description: str,
+        *,
+        tags: Optional[Sequence[str]] = None,
+        examples: Optional[Sequence[str]] = None,
+        input_modes: Optional[Sequence[str]] = None,
+        output_modes: Optional[Sequence[str]] = None,
+    ) -> AgentCapability:
+        return AgentCapability(
+            capability_id=capability_id,
+            name=name,
+            description=description,
+            tags=list(tags or []),
+            examples=list(examples or []),
+            input_modes=list(input_modes or ["text/plain"]),
+            output_modes=list(output_modes or ["text/plain"]),
+        )
+
+    @staticmethod
+    def _default_capability_mapping(config: AgentServerConfig) -> dict[str, str]:
+        return {
+            "id": _slugify(config.name),
+            "name": config.name,
+            "description": config.description,
+        }
+
+    @staticmethod
+    def _coerce_capability(
+        capability: CapabilityLike,
+        *,
+        default_name: str,
+        default_description: str,
+    ) -> AgentCapability:
+        if isinstance(capability, AgentCapability):
+            return capability
+        if not isinstance(capability, Mapping):
+            raise TypeError("capabilities must contain AgentCapability objects or mapping values.")
+        capability_id = capability.get("capability_id", capability.get("id")) or _slugify(default_name)
+        name = capability.get("name") or default_name
+        description = capability.get("description") or default_description
+        return AgentCapability(
+            capability_id=str(capability_id),
+            name=str(name),
+            description=str(description),
+            tags=[str(tag) for tag in capability.get("tags", []) or []],
+            examples=[str(example) for example in capability.get("examples", []) or []],
+            input_modes=[str(mode) for mode in capability.get("input_modes", ["text/plain"]) or ["text/plain"]],
+            output_modes=[str(mode) for mode in capability.get("output_modes", ["text/plain"]) or ["text/plain"]],
+        )
+
+    @staticmethod
+    def _coerce_handler(
+        handler: Union[AgentExecutor, RequestHandler],
+        *,
+        hooks: Optional[ExecutionHooks] = None,
+    ) -> AgentExecutor:
+        if isinstance(handler, AgentHandlerBase):
+            return handler
+        if hasattr(handler, "execute") and callable(getattr(handler, "execute")):
+            return handler  # type: ignore[return-value]
+        return FunctionHandler(handler=handler, hooks=hooks)  # type: ignore[arg-type]
 
     @classmethod
     def from_handler(

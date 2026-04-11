@@ -1,44 +1,67 @@
-# a2a-wrapper Detailed Guide
+# a2a-wrapper Guide
 
-This guide matches the current project exactly.
+This guide is for developers who want to use `a2a-wrapper` in a real project.
 
-Current package details:
+The package solves two problems:
 
-- distribution name: `a2a-wrapper`
-- import name: `a2a_wrapper`
-- package source: `src/a2a_wrapper/`
+1. turning your own agent logic into an A2A server
+2. calling A2A agents from Python without repeatedly handling low-level SDK shapes
 
-Current project folders:
+The package is built on top of the official Python `a2a-sdk`. It does not replace the SDK. It gives you a friendlier application layer on top of it.
 
-- `src/a2a_wrapper/`
-- `examples/`
-- `tests/`
+## 1. Package names
 
-This package is meant to make two things easier:
+- PyPI package: `a2a-wrapper`
+- Python import: `a2a_wrapper`
 
-1. exposing your own agent logic as an A2A server
-2. calling A2A servers through a clean Python client
+## 2. Install
 
-## 1. Public API of this project
+Base install from PyPI:
 
-For new code, use these names:
+```bash
+pip install a2a-wrapper
+```
+
+Optional extras:
+
+```bash
+pip install "a2a-wrapper[langchain]"
+pip install "a2a-wrapper[crewai]"
+```
+
+If you are developing this repository locally:
+
+```bash
+pip install -e .
+pip install -e .[dev]
+```
+
+For normal package usage from PyPI, you do not need editable install mode.
+
+## 3. Public API
+
+Use these names for new code:
 
 ```python
 from a2a_wrapper import (
     AgentClient,
     AgentServer,
-    AgentServerConfig,
-    AgentCapability,
-    AgentRequest,
-    ResponseContext,
-    AgentResult,
-    StreamEvent,
-    Conversation,
-    create_agent_server,
 )
 ```
 
-This project also keeps backward-compatible aliases for older names:
+For advanced usage, these helper types are also available:
+
+- `AgentCapability`
+- `AgentRequest`
+- `AgentResult`
+- `AgentServerConfig`
+- `Conversation`
+- `ResponseContext`
+- `StreamEvent`
+- `ExecutionHooks`
+- `create_agent_server`
+
+Backward-compatible aliases are also available:
 
 - `A2AAgentClient`
 - `A2AServerLauncher`
@@ -48,95 +71,358 @@ This project also keeps backward-compatible aliases for older names:
 - `TaskResponder`
 - `create_server`
 
-If you are starting fresh, prefer the newer names because they are easier to understand in normal Python code.
+## 4. API reference
 
-## 2. Installation
-
-### Base package
-
-```bash
-pip install -e .
-```
-
-### LangChain support
-
-```bash
-pip install -e .[langchain]
-```
-
-### CrewAI support
-
-```bash
-pip install -e .[crewai]
-```
-
-### Dev tools
-
-```bash
-pip install -e .[dev]
-```
-
-## 3. Project structure in this repo
-
-Current implementation files:
-
-- `src/a2a_wrapper/_client.py`
-  - client wrapper built on top of the official A2A SDK client
-- `src/a2a_wrapper/_server.py`
-  - server wrapper built on top of the official A2A SDK server APIs
-- `src/a2a_wrapper/__init__.py`
-  - package exports
-- `examples/my_langchain_agent.py`
-  - LangChain A2A server example
-- `examples/my_crewai_agent.py`
-  - CrewAI A2A server example
-
-## 4. Core concepts
-
-### `AgentServerConfig`
-
-This defines:
-
-- server name
-- description
-- host
-- port
-- version
-- streaming capability
-- docs URL
-
-Example:
-
-```python
-config = AgentServerConfig(
-    name="LangChain Math Agent",
-    description="A LangChain agent exposed as an A2A server",
-    host="0.0.0.0",
-    port=10002,
-)
-```
+This section explains the important classes and what they do in practice.
 
 ### `AgentCapability`
 
-This describes what your server can do in the A2A agent card.
+Server capability metadata.
 
-Example:
+Purpose:
+
+- tells clients what your agent can do
+- becomes part of the published A2A agent card
+
+Important fields:
+
+- `capability_id`
+- `name`
+- `description`
+- `tags`
+- `examples`
+- `input_modes`
+- `output_modes`
+
+### `AgentServerConfig`
+
+Server configuration and identity.
+
+Purpose:
+
+- defines how your server appears to clients
+- controls host, port, version, and streaming metadata
+
+Important fields:
+
+- `name`
+- `description`
+- `version`
+- `host`
+- `port`
+- `enable_streaming`
+- `docs_url`
+- `default_input_modes`
+- `default_output_modes`
+
+### `AgentRequest`
+
+Normalized request object passed to your handler.
+
+Purpose:
+
+- gives your app one stable request shape
+- hides low-level message-part extraction
+
+Useful fields:
+
+- `user_text`
+- `task_id`
+- `context_id`
+- `message_id`
+- `raw_context`
+- `raw_message`
+- `metadata`
+
+### `ResponseContext`
+
+Task lifecycle helper used inside server handlers.
+
+Purpose:
+
+- lets your handler update the current task
+- provides readable methods for common A2A states
+
+Main methods:
+
+- `progress(...)`
+- `working(...)`
+- `submit(...)`
+- `complete(...)`
+- `complete_json(...)`
+- `add_text_artifact(...)`
+- `add_parts(...)`
+- `need_input(...)`
+- `require_input(...)`
+- `require_auth(...)`
+- `reject(...)`
+- `cancel(...)`
+- `failed(...)`
+
+### `ExecutionHooks`
+
+Optional hook container for:
+
+- request logging
+- metrics
+- tracing
+- centralized success/error side effects
+
+Fields:
+
+- `on_request`
+- `on_success`
+- `on_error`
+
+### `AgentHandlerBase`
+
+Base class for class-based server handlers.
+
+Use this when:
+
+- you want inheritance
+- you want reusable handler classes
+- you prefer `run(...)` methods over plain functions
+
+### `FunctionHandler`
+
+Adapter that wraps a normal function handler into the class-based server execution model.
+
+Most users do not create this directly.
+
+### `AgentServer`
+
+Wrapper server object.
+
+Purpose:
+
+- owns config, capabilities, and handler
+- builds the A2A application
+- runs the HTTP server
+
+Autofill behavior:
+
+- if `capabilities` is omitted, the server creates one default capability
+- default capability id is generated from the server name
+- default capability name comes from the server name
+- default capability description comes from the server description
+- partial capability mappings inherit missing values from the server details
+
+Useful methods:
+
+- `capability()`
+- `build_agent_card()`
+- `build_request_handler()`
+- `build_application()`
+- `get_asgi_app()`
+- `run()`
+
+### `AgentClient`
+
+Main client wrapper for talking to an A2A server.
+
+Purpose:
+
+- connect to a remote agent
+- send messages
+- stream updates
+- inspect tasks
+- cancel tasks
+
+Useful methods:
+
+- `connect()`
+- `close()`
+- `get_agent_info()`
+- `send()`
+- `ask()`
+- `stream()`
+- `ask_stream()`
+- `get_task()`
+- `cancel_task()`
+- `new_conversation()`
+
+### `AgentInfo`
+
+Normalized agent card info returned by the client.
+
+Fields:
+
+- `name`
+- `description`
+- `version`
+- `url`
+- `streaming`
+- `skills`
+
+### `AgentResult`
+
+Normalized final result for blocking requests.
+
+Fields:
+
+- `task_id`
+- `context_id`
+- `state`
+- `text`
+- `raw`
+
+Convenience properties:
+
+- `is_complete`
+- `needs_input`
+- `is_failed`
+- `is_canceled`
+
+### `StreamEvent`
+
+Normalized event for streaming requests.
+
+Fields:
+
+- `task_id`
+- `context_id`
+- `state`
+- `text`
+- `raw`
+- `is_final`
+
+### `Conversation`
+
+Small helper for multi-turn continuity.
+
+Fields:
+
+- `task_id`
+- `context_id`
+
+### Exceptions
+
+- `A2AWrapperClientError`: base client error
+- `A2AWrapperConfigurationError`: invalid client configuration
+- `A2AWrapperRequestError`: connection or request failure
+
+## 5. How the server side works
+
+When you build a server with `AgentServer(...)` or `create_agent_server(...)`, the wrapper handles:
+
+- agent card creation
+- request handler wiring
+- request normalization
+- task updater plumbing
+- ASGI application creation
+- `uvicorn` startup
+
+Your code mainly focuses on:
+
+- capability metadata
+- business logic
+- final responses
+
+### Minimal server
+
+```python
+from a2a_wrapper import (
+    AgentServer,
+    AgentRequest,
+    ResponseContext,
+)
+
+
+async def echo_handler(request: AgentRequest, responder: ResponseContext) -> None:
+    await responder.progress("Processing request...")
+    await responder.complete(f"Echo: {request.user_text}")
+
+
+server = AgentServer(
+    name="Echo Agent",
+    description="Simple echo server",
+    host="0.0.0.0",
+    port=10002,
+    handler=echo_handler,
+)
+
+
+if __name__ == "__main__":
+    server.run()
+```
+
+In this form, the server auto-creates a default capability from:
+
+- `name="Echo Agent"`
+- `description="Simple echo server"`
+
+### Minimal server with partial capability override
+
+```python
+server = AgentServer(
+    name="Research Agent",
+    description="Runs research workflows",
+    capabilities=[
+        {
+            "id": "research",
+            "tags": ["research", "analysis"],
+        }
+    ],
+    handler=echo_handler,
+)
+```
+
+In this case:
+
+- capability id stays `research`
+- capability name becomes `Research Agent`
+- capability description becomes `Runs research workflows`
+
+## 6. Server concepts
+
+### `AgentServerConfig`
+
+This controls your server identity and network settings.
+
+```python
+config = AgentServerConfig(
+    name="Support Agent",
+    description="Answers support questions",
+    version="1.0.0",
+    host="0.0.0.0",
+    port=10002,
+    enable_streaming=True,
+    docs_url="https://your-docs.example.com",
+)
+```
+
+Important fields:
+
+- `name`
+- `description`
+- `version`
+- `host`
+- `port`
+- `enable_streaming`
+- `docs_url`
+- `default_input_modes`
+- `default_output_modes`
+
+### `AgentCapability`
+
+This is the skill metadata published in the A2A agent card.
 
 ```python
 capability = AgentCapability(
-    capability_id="math_reasoning",
-    name="Math Reasoning",
-    description="Solves math and basic text requests",
-    tags=["math", "tool-use"],
-    examples=["What is 2 + 2?", "Count the words in this sentence"],
+    capability_id="summarize",
+    name="Summarize",
+    description="Summarizes long text into concise bullets",
+    tags=["text", "summary"],
+    examples=["Summarize this meeting transcript"],
 )
 ```
 
 ### `AgentRequest`
 
-This is what your handler receives.
+This is the normalized input object passed to your handler.
 
-Important fields:
+Useful fields:
 
 - `request.user_text`
 - `request.task_id`
@@ -146,13 +432,13 @@ Important fields:
 - `request.raw_message`
 - `request.metadata`
 
-In most handlers, `request.user_text` is the main input you need.
+Most handlers only need `request.user_text`.
 
 ### `ResponseContext`
 
-This is what your handler uses to send updates back to the A2A client.
+This wraps the SDK task updater and gives you readable lifecycle methods.
 
-Useful methods:
+Common methods:
 
 - `await responder.progress(text)`
 - `await responder.working(text)`
@@ -168,73 +454,69 @@ Useful methods:
 - `await responder.cancel(reason)`
 - `await responder.failed(reason)`
 
-These map to the official A2A task lifecycle and make the wrapper more complete and easier to use.
+## 7. Server response patterns
 
-### `AgentClient`
-
-This is the client wrapper.
-
-Useful methods:
-
-- `await client.get_agent_info()`
-- `await client.send(text, ...)`
-- `await client.ask(text, ...)`
-- `await client.stream(text, ...)`
-- `await client.ask_stream(text, ...)`
-- `await client.get_task(task_id, ...)`
-- `await client.cancel_task(task_id)`
-- `client.new_conversation()`
-
-Sync helpers:
-
-- `client.ask_sync(...)`
-- `client.send_sync(...)`
-- `client.get_agent_info_sync()`
-- `client.get_task_sync(...)`
-- `client.cancel_task_sync(...)`
-
-## 5. Minimal server example
-
-This is the simplest possible server pattern in the current package:
+### Return a normal final answer
 
 ```python
-from a2a_wrapper import (
-    AgentCapability,
-    AgentRequest,
-    AgentServerConfig,
-    ResponseContext,
-    create_agent_server,
-)
-
-
-async def echo_handler(request: AgentRequest, responder: ResponseContext) -> None:
-    await responder.progress("Processing request...")
-    await responder.complete(f"Echo: {request.user_text}")
-
-
-server = create_agent_server(
-    config=AgentServerConfig(
-        name="Echo Agent",
-        description="Simple echo server",
-        host="0.0.0.0",
-        port=10002,
-    ),
-    capabilities=[
-        AgentCapability(
-            capability_id="echo",
-            name="Echo",
-            description="Repeats the user input",
-        )
-    ],
-    handler=echo_handler,
-)
-
-
-if __name__ == "__main__":
-    server.run()
+async def handler(request: AgentRequest, responder: ResponseContext) -> None:
+    await responder.complete(f"Received: {request.user_text}")
 ```
 
-## 6. Minimal client example
+### Send progress before finishing
+
+```python
+async def handler(request: AgentRequest, responder: ResponseContext) -> None:
+    await responder.submit("Task accepted.")
+    await responder.progress("Working on your request...")
+    await responder.complete("Done")
+```
+
+### Ask the client for more input
+
+```python
+async def handler(request: AgentRequest, responder: ResponseContext) -> None:
+    if not request.user_text.strip():
+        await responder.require_input("Please send a non-empty prompt.")
+        return
+
+    await responder.complete("Thanks")
+```
+
+### Fail explicitly
+
+```python
+async def handler(request: AgentRequest, responder: ResponseContext) -> None:
+    try:
+        result = do_work(request.user_text)
+    except Exception as exc:
+        await responder.failed(str(exc))
+        return
+
+    await responder.complete(result)
+```
+
+### Return artifacts
+
+```python
+async def handler(request: AgentRequest, responder: ResponseContext) -> None:
+    await responder.add_text_artifact("Intermediate report")
+    await responder.complete("Final answer")
+```
+
+## 8. How the client side works
+
+`AgentClient` wraps the official SDK client and normalizes different result shapes into a simpler interface.
+
+The wrapper handles:
+
+- SDK connection setup
+- agent card fetches
+- blocking vs streaming config
+- text extraction from tasks and artifacts
+- task id and context id tracking
+
+### Minimal client
 
 ```python
 import asyncio
@@ -242,11 +524,8 @@ import asyncio
 from a2a_wrapper import AgentClient
 
 
-async def main():
+async def main() -> None:
     async with AgentClient("http://localhost:10002") as client:
-        info = await client.get_agent_info()
-        print(info)
-
         reply = await client.send("Hello")
         print(reply.text)
 
@@ -254,211 +533,97 @@ async def main():
 asyncio.run(main())
 ```
 
-## 7. LangChain example in this project
+## 9. Client concepts
 
-This repo already contains:
+### `AgentInfo`
 
-- `examples/my_langchain_agent.py`
-
-That file uses:
-
-- `ChatOpenAI`
-- LangChain tools
-- `create_react_agent(...)`
-- `AgentExecutor.ainvoke(...)`
-- the wrapper’s `create_agent_server(...)`
-
-### Current LangChain flow in this repo
-
-1. build the LangChain agent
-2. receive A2A input through `AgentRequest`
-3. pass `request.user_text` to LangChain
-4. return the output through `ResponseContext.complete(...)`
-
-### Core handler pattern
+Normalized agent card information.
 
 ```python
-async def langchain_handler(request: AgentRequest, responder: ResponseContext) -> None:
-    await responder.progress("LangChain agent is processing the request...")
-
-    agent = build_langchain_agent(...)
-    result = await agent.ainvoke({"input": request.user_text})
-    answer = result.get("output", "No answer returned")
-
-    await responder.complete(answer)
+info = await client.get_agent_info()
+print(info.name)
+print(info.skills)
 ```
 
-### Why this works
+### `AgentResult`
 
-The wrapper takes care of:
+Blocking send result.
 
-- agent card generation
-- request parsing
-- task status updates
-- final result publishing
+Useful fields and helpers:
 
-So your LangChain code only needs to focus on:
+- `reply.task_id`
+- `reply.context_id`
+- `reply.state`
+- `reply.text`
+- `reply.is_complete`
+- `reply.needs_input`
+- `reply.is_failed`
+- `reply.is_canceled`
 
-- building the agent
-- passing input
-- returning output
+### `StreamEvent`
 
-### Run the LangChain example
+Streaming event result.
 
-```bash
-pip install -e .[langchain]
-python examples/my_langchain_agent.py
-```
+Useful fields:
 
-Default server URL:
+- `event.task_id`
+- `event.context_id`
+- `event.state`
+- `event.text`
+- `event.is_final`
 
-```text
-http://localhost:10002
-```
+### `Conversation`
 
-### Test the LangChain example
-
-With the installed console script:
-
-```bash
-a2a-wrapper-client --url http://localhost:10002 --msg "What is 27 * 3 + 4?"
-```
-
-Or with the module path:
-
-```bash
-python -m a2a_wrapper._client --url http://localhost:10002 --msg "What is 27 * 3 + 4?"
-```
-
-### Environment for LangChain example
-
-If you use OpenAI-backed LangChain components, create a `.env` file in the project root:
-
-```bash
-OPENAI_API_KEY=sk-...
-OPENAI_MODEL=gpt-4o-mini
-```
-
-## 8. CrewAI example in this project
-
-This repo already contains:
-
-- `examples/my_crewai_agent.py`
-
-That file uses:
-
-- `Agent`
-- `Crew`
-- `Task`
-- `Process`
-- `kickoff_async(...)`
-- the wrapper’s `create_agent_server(...)`
-
-### Current CrewAI flow in this repo
-
-1. build a CrewAI crew
-2. receive A2A input through `AgentRequest`
-3. pass `request.user_text` into the crew
-4. return the final result through `ResponseContext.complete(...)`
-
-### Core handler pattern
+Use this when you want multi-turn continuity.
 
 ```python
-async def crewai_handler(request: AgentRequest, responder: ResponseContext) -> None:
-    await responder.progress("CrewAI is working on the request...")
-
-    crew = build_research_crew(request.user_text)
-    result = await crew.kickoff_async(inputs={"topic": request.user_text})
-
-    await responder.complete(str(result))
+conversation = client.new_conversation()
+first = await client.send("Hello", conversation=conversation)
+second = await client.send("Continue", conversation=conversation)
 ```
 
-### Run the CrewAI example
+## 10. Client usage patterns
 
-```bash
-pip install -e .[crewai]
-python examples/my_crewai_agent.py
-```
-
-Default server URL:
-
-```text
-http://localhost:10003
-```
-
-### Test the CrewAI example
-
-```bash
-a2a-wrapper-client --url http://localhost:10003 --msg "Artificial Intelligence" --stream
-```
-
-Or:
-
-```bash
-python -m a2a_wrapper._client --url http://localhost:10003 --msg "Artificial Intelligence" --stream
-```
-
-## 9. Reusing conversations on the client
-
-If you want multiple messages to stay in the same logical task context, use a `Conversation`.
+### Get agent information
 
 ```python
-import asyncio
-
-from a2a_wrapper import AgentClient
-
-
-async def main():
-    async with AgentClient("http://localhost:10002") as client:
-        conversation = client.new_conversation()
-
-        first = await client.send("Hello", conversation=conversation)
-        second = await client.send(
-            "Continue from the previous message",
-            conversation=conversation,
-        )
-
-        print(first.text)
-        print(second.text)
-
-
-asyncio.run(main())
+info = await client.get_agent_info()
+print(info)
 ```
 
-## 10. Blocking vs streaming
-
-### Blocking
-
-Use:
+### Send a blocking request
 
 ```python
 reply = await client.send("Hello")
+print(reply.state)
+print(reply.text)
 ```
 
-You receive a final `AgentResult`.
+### Get only text
 
-### Streaming
+```python
+text = await client.ask("Hello")
+print(text)
+```
 
-Use:
+### Stream responses
 
 ```python
 async for event in client.stream("Hello"):
-    ...
+    if event.text:
+        print(event.text)
+    if event.is_final:
+        break
 ```
 
-You receive `StreamEvent` objects, which can carry intermediate working states and the final result.
-
-### Collecting a full streamed result
-
-Use:
+### Collect a streamed response into one string
 
 ```python
 text = await client.ask_stream("Hello")
+print(text)
 ```
 
-## 11. Request metadata and history length
-
-The client wrapper supports additional send/stream parameters:
+### Send metadata and history settings
 
 ```python
 reply = await client.send(
@@ -468,170 +633,223 @@ reply = await client.send(
 )
 ```
 
-And:
+### Fetch a task later
 
 ```python
-async for event in client.stream(
-    "Hello",
-    history_length=10,
-    metadata={"source": "cli"},
-):
-    ...
-```
-
-This makes it easier to preserve extra request context or control how much task history is requested from the server.
-
-## 12. Richer response states
-
-`AgentResult` includes these useful checks:
-
-- `reply.is_complete`
-- `reply.needs_input`
-- `reply.is_failed`
-- `reply.is_canceled`
-
-Example:
-
-```python
-reply = await client.send("Hello")
-
-if reply.needs_input:
-    print("Agent asked for more input")
-elif reply.is_failed:
-    print("Agent failed")
-elif reply.is_complete:
-    print("Agent completed")
-```
-
-## 13. More complete responder methods
-
-Because the wrapper now exposes more of the official task lifecycle, your handler can be more expressive.
-
-### Ask the user for more input
-
-```python
-async def handler(request, responder):
-    if not request.user_text.strip():
-        await responder.require_input("Please send a non-empty prompt.")
-        return
-    await responder.complete("Thanks")
-```
-
-### Mark as submitted before work starts
-
-```python
-async def handler(request, responder):
-    await responder.submit("Task received and queued.")
-    await responder.progress("Processing...")
-    await responder.complete("Done")
-```
-
-### Require authentication
-
-```python
-async def handler(request, responder):
-    await responder.require_auth("Please authenticate before using this agent.")
-```
-
-### Reject a request
-
-```python
-async def handler(request, responder):
-    await responder.reject("This request type is not supported.")
+task = await client.get_task(task_id)
 ```
 
 ### Cancel a task
 
 ```python
-async def handler(request, responder):
-    await responder.cancel("Task cancelled by server logic.")
+await client.cancel_task(task_id)
 ```
 
-### Add an artifact before completion
+## 11. Sync helpers
+
+For quick scripts and local tools:
 
 ```python
-async def handler(request, responder):
-    await responder.add_text_artifact("Intermediate artifact data")
-    await responder.complete("Final response")
+from a2a_wrapper import AgentClient
+
+
+client = AgentClient("http://localhost:10002")
+info = client.get_agent_info_sync()
+reply = client.send_sync("Hello")
+
+print(info.name)
+print(reply.text)
 ```
 
-## 14. Mapping to the official A2A SDK
+These helpers call `asyncio.run(...)` internally, so they are best for scripts, not for code already running inside an event loop.
 
-This wrapper is not replacing the A2A SDK. It is built on top of it.
+## 12. Real project structure
+
+A practical app layout can look like this:
+
+```text
+my_project/
+  pyproject.toml
+  .env
+  src/
+    my_project/
+      __init__.py
+      capabilities.py
+      server.py
+      client_demo.py
+      agents/
+        support_agent.py
+        research_agent.py
+```
+
+Suggested split:
+
+- keep A2A transport code in one server module
+- keep your framework or business logic in separate modules
+- keep capabilities in a shared file when multiple services reuse them
+
+## 13. LangChain example
+
+This repository includes `examples/my_langchain_agent.py`.
+
+That example does three things:
+
+1. defines LangChain tools
+2. builds a LangChain agent
+3. exposes it through `create_agent_server(...)`
+
+Typical handler shape:
+
+```python
+async def langchain_handler(request: AgentRequest, responder: ResponseContext) -> None:
+    await responder.progress("LangChain agent is processing the request...")
+    agent = build_langchain_agent(...)
+    result = await agent.ainvoke({"input": request.user_text})
+    await responder.complete(result.get("output", "No answer returned"))
+```
+
+Run it:
+
+```bash
+pip install "a2a-wrapper[langchain]"
+python examples/my_langchain_agent.py
+```
+
+Test it:
+
+```bash
+a2a-wrapper-client --url http://localhost:10002 --msg "What is 27 * 3 + 4?"
+```
+
+If you use OpenAI-backed models, add a `.env` file:
+
+```bash
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL=gpt-4o-mini
+```
+
+## 14. CrewAI example
+
+This repository includes `examples/my_crewai_agent.py`.
+
+That example:
+
+1. builds a CrewAI workflow
+2. receives A2A input through `AgentRequest`
+3. runs the crew
+4. returns the result through `ResponseContext`
+
+Typical handler shape:
+
+```python
+async def crewai_handler(request: AgentRequest, responder: ResponseContext) -> None:
+    await responder.progress("CrewAI is working on the request...")
+    crew = build_research_crew(request.user_text)
+    result = await crew.kickoff_async(inputs={"topic": request.user_text})
+    await responder.complete(str(result))
+```
+
+Run it:
+
+```bash
+pip install "a2a-wrapper[crewai]"
+python examples/my_crewai_agent.py
+```
+
+Test it:
+
+```bash
+a2a-wrapper-client --url http://localhost:10003 --msg "Artificial Intelligence" --stream
+```
+
+## 15. How this maps to the official SDK
+
+This package wraps common SDK pieces. Under the hood, it still relies on the official A2A Python SDK.
 
 Client side:
 
-- official SDK connection uses `ClientFactory.connect(...)`
-- message creation uses `create_text_message_object(...)`
-- send configuration uses `MessageSendConfiguration`
+- `ClientFactory.connect(...)`
+- `create_text_message_object(...)`
+- `MessageSendConfiguration`
 
 Server side:
 
-- custom handlers sit on top of `AgentExecutor`
-- app creation uses `A2AStarletteApplication`
-- request handling uses `DefaultRequestHandler`
-- response lifecycle uses `TaskUpdater`
+- `AgentExecutor`
+- `DefaultRequestHandler`
+- `A2AStarletteApplication`
+- `TaskUpdater`
 
-The official Python SDK docs expose these pieces:
+That means:
 
-- [a2a package docs](https://a2a-protocol.org/latest/sdk/python/api/a2a.html)
-- [a2a.server package docs](https://a2a-protocol.org/latest/sdk/python/api/a2a.server.html)
-- [TaskUpdater docs](https://a2a-protocol.org/latest/sdk/python/api/a2a.server.tasks.task_updater.html)
+- you still benefit from the official SDK behavior
+- you write less plumbing code in your app
+- you can drop down to lower-level SDK concepts if your project needs it
 
-From the `TaskUpdater` docs, the official SDK supports operations such as `requires_input`, `start_work`, `submit`, `requires_auth`, and `reject`, and this wrapper now exposes those ideas in `ResponseContext`. The server package docs also document the server-side pieces like `AgentExecutor` and `DefaultRequestHandler`, which are what this wrapper is building on top of.
+## 16. When to use this package
 
-## 15. Current package-specific commands
+Use `a2a-wrapper` when:
 
-Install package:
+- you want a cleaner API for app teams
+- you expose multiple agents and want consistent patterns
+- you use LangChain or CrewAI and do not want to repeat A2A boilerplate
+- you want a readable client wrapper for Python apps and scripts
 
-```bash
-pip install -e .
-```
+Use raw `a2a-sdk` when:
 
-Run tests:
+- you need low-level control over every server and client primitive
+- you are building unusual transport or lifecycle behavior
+- your team already prefers the raw SDK surface
+
+## 17. Testing your integration
+
+Run the repository tests:
 
 ```bash
 pytest
 ```
 
-Run LangChain example:
+A good app-level test strategy is:
 
-```bash
-pip install -e .[langchain]
-python examples/my_langchain_agent.py
+1. unit test your agent logic without A2A
+2. unit test your handler behavior
+3. add one smoke test that boots the A2A server locally
+4. verify the Python client can send and receive messages
+
+## 18. Common mistakes
+
+### Using the PyPI name in imports
+
+Wrong:
+
+```python
+import a2a-wrapper
 ```
 
-Run CrewAI example:
+Correct:
 
-```bash
-pip install -e .[crewai]
-python examples/my_crewai_agent.py
+```python
+import a2a_wrapper
 ```
 
-Call the console script:
+### Forgetting to send a terminal response
 
-```bash
-a2a-wrapper-client --url http://localhost:10002 --msg "Hello"
-```
+A handler must finish with a terminal state such as:
 
-## 16. Current file references
+- `await responder.complete(...)`
+- `await responder.require_input(...)`
+- `await responder.failed(...)`
+- `await responder.cancel(...)`
 
-- package exports: [__init__.py](C:\Users\ay936\Downloads\a2a_wrapper\src\a2a_wrapper\__init__.py)
-- client wrapper: [_client.py](C:\Users\ay936\Downloads\a2a_wrapper\src\a2a_wrapper\_client.py)
-- server wrapper: [_server.py](C:\Users\ay936\Downloads\a2a_wrapper\src\a2a_wrapper\_server.py)
-- LangChain example: [my_langchain_agent.py](C:\Users\ay936\Downloads\a2a_wrapper\examples\my_langchain_agent.py)
-- CrewAI example: [my_crewai_agent.py](C:\Users\ay936\Downloads\a2a_wrapper\examples\my_crewai_agent.py)
-- examples quick guide: [README.md](C:\Users\ay936\Downloads\a2a_wrapper\examples\README.md)
+### Mixing sync helpers into async app code
 
-## 17. Practical recommendation
+If you are already inside `async def`, use the async methods, not `ask_sync()` or `send_sync()`.
 
-If you are building a real project with this wrapper:
+## 19. Summary
 
-- keep your own agent code separate from the wrapper package
-- let the wrapper handle transport and A2A glue
-- keep your LangChain or CrewAI business logic inside your own module
-- add tests for your handlers
-- pin your framework versions
-- decide how you want task persistence, auth, and deployment to work
+`a2a-wrapper` is a practical layer for teams who want to work with A2A without writing the same SDK plumbing in every service.
 
-This package should make the A2A layer easier, not hide your actual agent architecture.
+Use it when you want:
+
+- a small server adapter around your agent logic
+- a small Python client around A2A agents
+- cleaner code for real applications
